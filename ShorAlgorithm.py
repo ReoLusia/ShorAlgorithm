@@ -6,7 +6,9 @@
 
 class ShorN6X5:
         
-    def __init__(self, n=6, x=5, n_count=4, backend_name="ibmq_qasm_simulator"):        
+    def __init__(self, n=6, x=5, n_count=4, shots=1000, backend_name="ibmq_qasm_simulator", IsTwirl=False):        
+        from math import pi
+        
         # load IBMQ Accounts
         backend_use = BackendInit(backend_name)
         
@@ -14,9 +16,24 @@ class ShorN6X5:
         self.n = n # factoring number
         self.x = x # modular
         self.n_count = n_count  # number of counting qubits
+        self.shots = shots # number of shots
         self.backend_name = backend_use # simulation backend
+        self.IsTwirl = IsTwirl # measurement error mitigation (twriling)
+        self.Unitary_Twirl = {
+            1:[0, 0, 0],
+            2:[pi, 3*pi/2, pi/2],
+            3:[pi, 0, pi],
+            4:[0, pi/2, pi/2],
+            5:[pi/2, 0, pi/2],
+            6:[pi/2, pi, pi/2],
+            7:[pi/2, pi/2, pi],
+            8:[pi/2, pi/2, 0],
+            9:[pi/2, 3*pi/2, pi],
+            10:[pi/2, pi/2, 0],
+            11:[pi/2, 0, 3*pi/2],
+            12:[pi/2, pi, 3*pi/2]} # twirling parameters
 
-    def ConstructQC(self):
+    def ConstructQC(self, unitary_index=1):
         from qiskit import QuantumCircuit
         
         # construct quantum circuit
@@ -29,21 +46,86 @@ class ShorN6X5:
         for q in range(self.n_count): # Do controlled-U operations
             qc.append(CxMod6(self.x, 2**q), [q] + [i+self.n_count for i in range(3)])
         qc.append(QftDagger(self.n_count), range(self.n_count)) # Do inverse-QFT
-        qc.measure(range(self.n_count), range(self.n_count))
+        
+        if self.IsTwirl == True: # twirling
+            qc.append(Twirling(self.Unitary_Twirl, unitary_index, self.n_count), [i for i in range(self.n_count)])
+
+        qc.measure(range(self.n_count), range(self.n_count)) # measurement
 
         return qc
         
-    def SimulationQC(self):
+    def SimulationQC(self, unitary_index_set=[1,5,9], eta=0.1):
         from qiskit import transpile, assemble
         from qiskit.visualization import plot_histogram
         
-        qc = self.ConstructQC() # construct quantum circuit
-        backend = self.backend_name # setting backend
-        t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
+        if self.IsTwirl == False: # no twirling
+            print('==================================================')
+            print('Name of Backend :', self.backend_name) # Setting Simulation Backend
+            print('Number of Total Shots :', self.shots) # Setting Simulation Shot Number
+            
+            qc = self.ConstructQC() # construct quantum circuit
+            backend = self.backend_name # setting backend
+            t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
+
+            print("Transpiled Quantum Circuit Depth :", t_qc.depth())
+            results = backend.run(assemble(t_qc, shots=self.shots)).result() # get result
+            
+            # Counts Result
+            counts = results.get_counts() # get counts
+            print('Simulation Result (counts) :', counts)
+            print('==================================================')
         
-        print("Circuit depth on aer_simulator :", t_qc.depth())
-        results = backend.run(assemble(t_qc)).result() # get result
-        counts = results.get_counts() # get counts
+        else: # twirling
+            ## Quantum pre-processing
+            # Variable setting
+            counts = {}
+            
+            # Apply 3 unitray indexes to twriling
+            for unitary_index in unitary_index_set:
+                print('==================================================')
+                print('Unitary Index :', unitary_index) # Setting Unitary Index
+                print('Name of Backend :', self.backend_name) # Setting Simulation Backend
+                print('Number of Total Shots :', self.shots) # Setting Simulation Shot Number
+
+                qc = self.ConstructQC(unitary_index) # construct quantum circuit
+                backend = self.backend_name # setting backend
+                t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
+                
+                print('Transpiled Quantum Circuit Depth :', t_qc.depth())
+                results = backend.run(assemble(t_qc, shots=self.shots)).result() # get result
+
+                # Counts Result
+                temp_counts = results.get_counts()
+                print('Simulation Result (counts) :', temp_counts)
+                
+                counts = SumDictionary(counts, temp_counts)
+                print('==================================================\n')
+
+            ## Classical post-processing
+            # Variable setting
+            measurement_counts = []
+            for i in range(self.n_count):
+                measurement_counts.append([0, 0])
+            counts_pp = {}
+            
+            for key in counts: # average count results
+                counts[key] = round(counts[key]/3)
+                
+            # Calculate counts of [x_n | n]
+            for i in range(self.n_count):
+                for key in counts:
+                    if key[i] == "0":
+                        measurement_counts[i][0] += counts[key]
+                    else:
+                        measurement_counts[i][1] += counts[key]
+                                    
+            # Recover counts
+            for key in counts:
+                counts_pp[key] = counts[key]
+                for i in range(self.n_count):
+                    counts_pp[key] = counts_pp[key] * ( (1 - (eta*self.shots)/(2*measurement_counts[i][int(key[i])])) / (1-eta) )
+                counts_pp[key] = round(counts_pp[key])
+            counts = counts_pp
         
         return plot_histogram(counts)
         
@@ -95,7 +177,9 @@ class ShorN6X5:
 
 class ShorN21X4:
     
-    def __init__(self, n=21, x=4, control_q=3, ancilla_q=2, backend_name="ibmq_qasm_simulator"):        
+    def __init__(self, n=21, x=4, control_q=3, shots=1000, ancilla_q=2, backend_name="ibmq_qasm_simulator", IsTwirl=False):        
+        from math import pi
+        
         # load IBMQ Accounts
         backend_use = BackendInit(backend_name)
 
@@ -104,9 +188,24 @@ class ShorN21X4:
         self.x = x # modular
         self.control_q = control_q # number of control qubits
         self.ancilla_q = ancilla_q # number of ancilla qubits
+        self.shots = shots # number of shots
         self.backend_name = backend_use # simulation backend
+        self.IsTwirl = IsTwirl # measurement error mitigation (twriling)
+        self.Unitary_Twirl = {
+            1:[0, 0, 0],
+            2:[pi, 3*pi/2, pi/2],
+            3:[pi, 0, pi],
+            4:[0, pi/2, pi/2],
+            5:[pi/2, 0, pi/2],
+            6:[pi/2, pi, pi/2],
+            7:[pi/2, pi/2, pi],
+            8:[pi/2, pi/2, 0],
+            9:[pi/2, 3*pi/2, pi],
+            10:[pi/2, pi/2, 0],
+            11:[pi/2, 0, 3*pi/2],
+            12:[pi/2, pi, 3*pi/2]} # twirling parameters
     
-    def ConstructQC(self):
+    def ConstructQC(self, unitary_index=1):
         from qiskit import QuantumCircuit
         
         qc = QuantumCircuit(self.control_q+self.ancilla_q, self.control_q) # Circuit initialization
@@ -134,22 +233,86 @@ class ShorN21X4:
         # Do inverse-QFT
         qc.append(QftDagger(self.control_q), range(self.control_q))
 
+        if self.IsTwirl == True: # twirling
+            qc.append(Twirling(self.Unitary_Twirl, unitary_index, self.control_q), [i for i in range(self.control_q)])
+        
         # Measure circuit
         qc.measure(range(self.control_q), range(self.control_q))
         
         return qc
     
-    def SimulationQC(self):
+    def SimulationQC(self, unitary_index_set=[1,5,9], eta=0.1):
         from qiskit import transpile, assemble
         from qiskit.visualization import plot_histogram
         
-        qc = self.ConstructQC() # construct quantum circuit
-        backend = self.backend_name # setting backend
-        t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
-        
-        print("Circuit depth on aer_simulator :", t_qc.depth())
-        results = backend.run(assemble(t_qc)).result() # get result
-        counts = results.get_counts() # get counts
+        if self.IsTwirl == False: # no twirling
+            print('==================================================')
+            print('Name of Backend :', self.backend_name) # Setting Simulation Backend
+            print('Number of Total Shots :', self.shots) # Setting Simulation Shot Number
+            
+            qc = self.ConstructQC() # construct quantum circuit
+            backend = self.backend_name # setting backend
+            t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
+
+            print("Transpiled Quantum Circuit Depth :", t_qc.depth())
+            results = backend.run(assemble(t_qc, shots=self.shots)).result() # get result
+            
+            # Counts Result
+            counts = results.get_counts() # get counts
+            print('Simulation Result (counts) :', counts)
+            print('==================================================')
+
+        else: # twirling
+            ## Quantum pre-processing
+            # Variable setting
+            counts = {}
+            
+            # Apply 3 unitray indexes to twriling
+            for unitary_index in unitary_index_set:
+                print('==================================================')
+                print('Unitary Index :', unitary_index) # Setting Unitary Index
+                print('Name of Backend :', self.backend_name) # Setting Simulation Backend
+                print('Number of Total Shots :', self.shots) # Setting Simulation Shot Number
+
+                qc = self.ConstructQC(unitary_index) # construct quantum circuit
+                backend = self.backend_name # setting backend
+                t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
+                
+                print('Transpiled Quantum Circuit Depth :', t_qc.depth())
+                results = backend.run(assemble(t_qc, shots=self.shots)).result() # get result
+
+                # Counts Result
+                temp_counts = results.get_counts()
+                print('Simulation Result (counts) :', temp_counts)
+                
+                counts = SumDictionary(counts, temp_counts)
+                print('==================================================\n')
+
+            ## Classical post-processing
+            # Variable setting
+            measurement_counts = []
+            for i in range(self.control_q):
+                measurement_counts.append([0, 0])
+            counts_pp = {}
+            
+            for key in counts: # average count results
+                counts[key] = round(counts[key]/3)
+                
+            # Calculate counts of [x_n | n]
+            for i in range(self.control_q):
+                for key in counts:
+                    if key[i] == "0":
+                        measurement_counts[i][0] += counts[key]
+                    else:
+                        measurement_counts[i][1] += counts[key]
+                                    
+            # Recover counts
+            for key in counts:
+                counts_pp[key] = counts[key]
+                for i in range(self.control_q):
+                    counts_pp[key] = counts_pp[key] * ( (1 - (eta*self.shots)/(2*measurement_counts[i][int(key[i])])) / (1-eta) )
+                counts_pp[key] = round(counts_pp[key])
+            counts = counts_pp
         
         return plot_histogram(counts)
 
@@ -201,7 +364,9 @@ class ShorN21X4:
 
 class ShorN35X16:
     
-    def __init__(self, n=35, x=16, control_q=3, ancilla_q=2, backend_name="ibmq_qasm_simulator"):        
+    def __init__(self, n=21, x=4, control_q=3, shots=1000, ancilla_q=2, backend_name="ibmq_qasm_simulator", IsTwirl=False):        
+        from math import pi
+        
         # load IBMQ Accounts
         backend_use = BackendInit(backend_name)
 
@@ -210,9 +375,24 @@ class ShorN35X16:
         self.x = x # modular
         self.control_q = control_q # number of control qubits
         self.ancilla_q = ancilla_q # number of ancilla qubits
+        self.shots = shots # number of shots
         self.backend_name = backend_use # simulation backend
+        self.IsTwirl = IsTwirl # measurement error mitigation (twriling)
+        self.Unitary_Twirl = {
+            1:[0, 0, 0],
+            2:[pi, 3*pi/2, pi/2],
+            3:[pi, 0, pi],
+            4:[0, pi/2, pi/2],
+            5:[pi/2, 0, pi/2],
+            6:[pi/2, pi, pi/2],
+            7:[pi/2, pi/2, pi],
+            8:[pi/2, pi/2, 0],
+            9:[pi/2, 3*pi/2, pi],
+            10:[pi/2, pi/2, 0],
+            11:[pi/2, 0, 3*pi/2],
+            12:[pi/2, pi, 3*pi/2]} # twirling parameters
     
-    def ConstructQC(self):
+    def ConstructQC(self, unitary_index=1):
         from qiskit import QuantumCircuit
         
         qc = QuantumCircuit(self.control_q+self.ancilla_q, self.control_q) # Circuit initialization
@@ -240,22 +420,86 @@ class ShorN35X16:
         # Do inverse-QFT
         qc.append(QftDagger(self.control_q), range(self.control_q))
 
+        if self.IsTwirl == True: # twirling
+            qc.append(Twirling(self.Unitary_Twirl, unitary_index, self.control_q), [i for i in range(self.control_q)])
+        
         # Measure circuit
         qc.measure(range(self.control_q), range(self.control_q))
         
         return qc
     
-    def SimulationQC(self):
+    def SimulationQC(self, unitary_index_set=[1,5,9], eta=0.1):
         from qiskit import transpile, assemble
         from qiskit.visualization import plot_histogram
         
-        qc = self.ConstructQC() # construct quantum circuit
-        backend = self.backend_name # setting backend
-        t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
-        
-        print("Circuit depth on aer_simulator :", t_qc.depth())
-        results = backend.run(assemble(t_qc)).result() # get result
-        counts = results.get_counts() # get counts
+        if self.IsTwirl == False: # no twirling
+            print('==================================================')
+            print('Name of Backend :', self.backend_name) # Setting Simulation Backend
+            print('Number of Total Shots :', self.shots) # Setting Simulation Shot Number
+            
+            qc = self.ConstructQC() # construct quantum circuit
+            backend = self.backend_name # setting backend
+            t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
+
+            print("Transpiled Quantum Circuit Depth :", t_qc.depth())
+            results = backend.run(assemble(t_qc, shots=self.shots)).result() # get result
+            
+            # Counts Result
+            counts = results.get_counts() # get counts
+            print('Simulation Result (counts) :', counts)
+            print('==================================================')
+
+        else: # twirling
+            ## Quantum pre-processing
+            # Variable setting
+            counts = {}
+            
+            # Apply 3 unitray indexes to twriling
+            for unitary_index in unitary_index_set:
+                print('==================================================')
+                print('Unitary Index :', unitary_index) # Setting Unitary Index
+                print('Name of Backend :', self.backend_name) # Setting Simulation Backend
+                print('Number of Total Shots :', self.shots) # Setting Simulation Shot Number
+
+                qc = self.ConstructQC(unitary_index) # construct quantum circuit
+                backend = self.backend_name # setting backend
+                t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
+                
+                print('Transpiled Quantum Circuit Depth :', t_qc.depth())
+                results = backend.run(assemble(t_qc, shots=self.shots)).result() # get result
+
+                # Counts Result
+                temp_counts = results.get_counts()
+                print('Simulation Result (counts) :', temp_counts)
+                
+                counts = SumDictionary(counts, temp_counts)
+                print('==================================================\n')
+
+            ## Classical post-processing
+            # Variable setting
+            measurement_counts = []
+            for i in range(self.control_q):
+                measurement_counts.append([0, 0])
+            counts_pp = {}
+            
+            for key in counts: # average count results
+                counts[key] = round(counts[key]/3)
+                
+            # Calculate counts of [x_n | n]
+            for i in range(self.control_q):
+                for key in counts:
+                    if key[i] == "0":
+                        measurement_counts[i][0] += counts[key]
+                    else:
+                        measurement_counts[i][1] += counts[key]
+                                    
+            # Recover counts
+            for key in counts:
+                counts_pp[key] = counts[key]
+                for i in range(self.control_q):
+                    counts_pp[key] = counts_pp[key] * ( (1 - (eta*self.shots)/(2*measurement_counts[i][int(key[i])])) / (1-eta) )
+                counts_pp[key] = round(counts_pp[key])
+            counts = counts_pp
         
         return plot_histogram(counts)
 
@@ -299,7 +543,7 @@ class ShorN35X16:
                 for guess in guesses:
                     if guess not in [1,self.n] and (self.n % guess) == 0: # Check to see if guess is a factor
                         print("*** Non-trivial factor found: %i ***" % guess)
-                        factor_found = True    
+                        factor_found = True   
 
 
 # In[4]:
@@ -307,7 +551,9 @@ class ShorN35X16:
 
 class ShorN65X16:
     
-    def __init__(self, n=65, x=16, control_q=3, ancilla_q=3, backend_name="ibmq_qasm_simulator"):        
+    def __init__(self, n=21, x=4, control_q=3, shots=1000, ancilla_q=2, backend_name="ibmq_qasm_simulator", IsTwirl=False):        
+        from math import pi
+        
         # load IBMQ Accounts
         backend_use = BackendInit(backend_name)
 
@@ -316,9 +562,24 @@ class ShorN65X16:
         self.x = x # modular
         self.control_q = control_q # number of control qubits
         self.ancilla_q = ancilla_q # number of ancilla qubits
+        self.shots = shots # number of shots
         self.backend_name = backend_use # simulation backend
+        self.IsTwirl = IsTwirl # measurement error mitigation (twriling)
+        self.Unitary_Twirl = {
+            1:[0, 0, 0],
+            2:[pi, 3*pi/2, pi/2],
+            3:[pi, 0, pi],
+            4:[0, pi/2, pi/2],
+            5:[pi/2, 0, pi/2],
+            6:[pi/2, pi, pi/2],
+            7:[pi/2, pi/2, pi],
+            8:[pi/2, pi/2, 0],
+            9:[pi/2, 3*pi/2, pi],
+            10:[pi/2, pi/2, 0],
+            11:[pi/2, 0, 3*pi/2],
+            12:[pi/2, pi, 3*pi/2]} # twirling parameters
     
-    def ConstructQC(self):
+    def ConstructQC(self, unitary_index=1):
         from qiskit import QuantumCircuit
         
         qc = QuantumCircuit(self.control_q+self.ancilla_q, self.control_q) # Circuit initialization
@@ -346,22 +607,86 @@ class ShorN65X16:
         # Do inverse-QFT
         qc.append(QftDagger(self.control_q), range(self.control_q))
 
+        if self.IsTwirl == True: # twirling
+            qc.append(Twirling(self.Unitary_Twirl, unitary_index, self.control_q), [i for i in range(self.control_q)])
+        
         # Measure circuit
         qc.measure(range(self.control_q), range(self.control_q))
         
         return qc
     
-    def SimulationQC(self):
+    def SimulationQC(self, unitary_index_set=[1,5,9], eta=0.1):
         from qiskit import transpile, assemble
         from qiskit.visualization import plot_histogram
         
-        qc = self.ConstructQC() # construct quantum circuit
-        backend = self.backend_name # setting backend
-        t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
-        
-        print("Circuit depth on aer_simulator :", t_qc.depth())
-        results = backend.run(assemble(t_qc)).result() # get result
-        counts = results.get_counts() # get counts
+        if self.IsTwirl == False: # no twirling
+            print('==================================================')
+            print('Name of Backend :', self.backend_name) # Setting Simulation Backend
+            print('Number of Total Shots :', self.shots) # Setting Simulation Shot Number
+            
+            qc = self.ConstructQC() # construct quantum circuit
+            backend = self.backend_name # setting backend
+            t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
+
+            print("Transpiled Quantum Circuit Depth :", t_qc.depth())
+            results = backend.run(assemble(t_qc, shots=self.shots)).result() # get result
+            
+            # Counts Result
+            counts = results.get_counts() # get counts
+            print('Simulation Result (counts) :', counts)
+            print('==================================================')
+
+        else: # twirling
+            ## Quantum pre-processing
+            # Variable setting
+            counts = {}
+            
+            # Apply 3 unitray indexes to twriling
+            for unitary_index in unitary_index_set:
+                print('==================================================')
+                print('Unitary Index :', unitary_index) # Setting Unitary Index
+                print('Name of Backend :', self.backend_name) # Setting Simulation Backend
+                print('Number of Total Shots :', self.shots) # Setting Simulation Shot Number
+
+                qc = self.ConstructQC(unitary_index) # construct quantum circuit
+                backend = self.backend_name # setting backend
+                t_qc = transpile(qc, self.backend_name, optimization_level=2) # quantum circuit transpile
+                
+                print('Transpiled Quantum Circuit Depth :', t_qc.depth())
+                results = backend.run(assemble(t_qc, shots=self.shots)).result() # get result
+
+                # Counts Result
+                temp_counts = results.get_counts()
+                print('Simulation Result (counts) :', temp_counts)
+                
+                counts = SumDictionary(counts, temp_counts)
+                print('==================================================\n')
+
+            ## Classical post-processing
+            # Variable setting
+            measurement_counts = []
+            for i in range(self.control_q):
+                measurement_counts.append([0, 0])
+            counts_pp = {}
+            
+            for key in counts: # average count results
+                counts[key] = round(counts[key]/3)
+                
+            # Calculate counts of [x_n | n]
+            for i in range(self.control_q):
+                for key in counts:
+                    if key[i] == "0":
+                        measurement_counts[i][0] += counts[key]
+                    else:
+                        measurement_counts[i][1] += counts[key]
+                                    
+            # Recover counts
+            for key in counts:
+                counts_pp[key] = counts[key]
+                for i in range(self.control_q):
+                    counts_pp[key] = counts_pp[key] * ( (1 - (eta*self.shots)/(2*measurement_counts[i][int(key[i])])) / (1-eta) )
+                counts_pp[key] = round(counts_pp[key])
+            counts = counts_pp
         
         return plot_histogram(counts)
 
@@ -405,7 +730,7 @@ class ShorN65X16:
                 for guess in guesses:
                     if guess not in [1,self.n] and (self.n % guess) == 0: # Check to see if guess is a factor
                         print("*** Non-trivial factor found: %i ***" % guess)
-                        factor_found = True    
+                        factor_found = True   
 
 
 # In[5]:
@@ -505,4 +830,44 @@ def Margolous(n):
     
     qc.name = "Marg"
     return qc
+
+
+# In[9]:
+
+
+def Twirling(Unitary_Twirl, unitary_index, qubit_num):
+    from qiskit import QuantumCircuit, QuantumRegister
+
+    # Create state initialize circuit
+    qr = QuantumRegister(qubit_num)
+    circ = QuantumCircuit(qr, name='Twirling')
+    
+    # Apply U
+    theta = (Unitary_Twirl[unitary_index])[0]
+    phi = (Unitary_Twirl[unitary_index])[1]
+    lam = (Unitary_Twirl[unitary_index])[2]
+    circ.u(theta, phi, lam, qr)
+    
+    # Apply U^{dag}
+    theta = -(Unitary_Twirl[unitary_index])[0]
+    phi = -(Unitary_Twirl[unitary_index])[2]
+    lam = -(Unitary_Twirl[unitary_index])[1]
+    circ.u(theta, phi, lam, qr)
+    
+    # Convert to a gate and stick it into an arbitrary place in the bigger circuit
+    inst = circ.to_instruction()
+
+    return inst
+
+
+# In[10]:
+
+
+def SumDictionary(totdic, adddic):
+    for key in adddic:
+        if key in totdic:
+            totdic[key] += adddic[key]
+        else:
+            totdic[key] = adddic[key]
+    return totdic
 
