@@ -832,7 +832,7 @@ def Margolous(n):
     return qc
 
 
-# In[9]:
+# In[1]:
 
 
 def Twirling(Unitary_Twirl, unitary_index, qubit_num):
@@ -847,6 +847,7 @@ def Twirling(Unitary_Twirl, unitary_index, qubit_num):
     phi = (Unitary_Twirl[unitary_index])[1]
     lam = (Unitary_Twirl[unitary_index])[2]
     circ.u(theta, phi, lam, qr)
+    circ.barrier()
     
     # Apply U^{dag}
     theta = -(Unitary_Twirl[unitary_index])[0]
