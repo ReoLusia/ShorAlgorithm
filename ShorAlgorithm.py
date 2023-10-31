@@ -50,7 +50,7 @@ class ShorN6X5:
         if self.IsTwirl == True: # twirling
             qc.append(Twirling(self.Unitary_Twirl, unitary_index, self.n_count), [i for i in range(self.n_count)])
 
-        qc.measure(range(self.n_count), range(self.n_count)) # measurement
+        qc.measure(range(self.n_count), range(self.n_count)) # measuremeN6X5nt
 
         return qc
         
@@ -364,7 +364,7 @@ class ShorN21X4:
 
 class ShorN35X16:
     
-    def __init__(self, n=21, x=4, control_q=3, shots=1000, ancilla_q=2, backend_name="ibmq_qasm_simulator", IsTwirl=False):        
+    def __init__(self, n=35, x=16, control_q=3, shots=1000, ancilla_q=2, backend_name="ibmq_qasm_simulator", IsTwirl=False):        
         from math import pi
         
         # load IBMQ Accounts
@@ -551,7 +551,7 @@ class ShorN35X16:
 
 class ShorN65X16:
     
-    def __init__(self, n=21, x=4, control_q=3, shots=1000, ancilla_q=2, backend_name="ibmq_qasm_simulator", IsTwirl=False):        
+    def __init__(self, n=65, x=16, control_q=3, shots=1000, ancilla_q=2, backend_name="ibmq_qasm_simulator", IsTwirl=False):        
         from math import pi
         
         # load IBMQ Accounts
@@ -741,7 +741,8 @@ def BackendInit(backend_input):
     
     # backend setting
     provider = IBMQ.load_account()
-    my_provider = IBMQ.get_provider(hub='ibm-q-skku', group='kaist', project='kaist-graduate')
+    my_provider = IBMQ.get_provider(hub='ibm-q', group='open', project='main')
+    #my_provider = IBMQ.get_provider(hub='ibm-q-skku', group='kaist', project='kaist-graduate')
     backends = my_provider.backends()
 
     # Check the availability of backend_name
@@ -752,12 +753,18 @@ def BackendInit(backend_input):
             break
         else:
             error_count += 1
-
+            
     # Alert Errors...
     if error_count == len(backends):
         raise ValueError("Backend_name must be in the list of IBMQ account backends...")
         
     return backend_use
+
+
+# In[6]:
+
+
+BackendInit("ibmq_qasm_simulator")
 
 
 # In[6]:
